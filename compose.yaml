@@ -1,0 +1,94 @@
+services:
+  traefik:
+    image: traefik:v3.1.0
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - proxy
+    ports:
+      - 80:80
+      - 443:443
+      # - 443:443/tcp # Uncomment if you want HTTP3
+      # - 443:443/udp # Uncomment if you want HTTP3
+    environment:
+      CF_DNS_API_TOKEN_FILE: /run/secrets/cf_api_token # note using _FILE for docker secrets
+      # CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN} # if using .env
+      TRAEFIK_DASHBOARD_CREDENTIALS: ${TRAEFIK_DASHBOARD_CREDENTIALS}
+    secrets:
+      - cf_api_token
+    env_file: .env # use .env
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/data/traefik.yml:/traefik.yml:ro
+      - ./traefik/data/acme.json:/acme.json
+      # - ./data/config.yml:/config.yml:ro
+    command:
+      - "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=true"
+      - "--entrypoints.web.addres=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+    # labels:
+    #   - "traefik.enable=true"
+    #   - "traefik.http.routers.traefik.entrypoints=http"
+    #   - "traefik.http.routers.traefik.rule=Host(`traefik.home.jmur.ca`)"
+    #   - "traefik.http.middlewares.traefik-auth.basicauth.users=${TRAEFIK_DASHBOARD_CREDENTIALS}"
+    #   - "traefik.http.middlewares.traefik-https-redirect.redirectscheme.scheme=https"
+    #   - "traefik.http.middlewares.sslheader.headers.customrequestheaders.X-Forwarded-Proto=https"
+    #   - "traefik.http.routers.traefik.middlewares=traefik-https-redirect"
+    #   - "traefik.http.routers.traefik-secure.entrypoints=https"
+    #   - "traefik.http.routers.traefik-secure.rule=Host(`traefik.home.jmur.ca`)"
+    #   - "traefik.http.routers.traefik-secure.middlewares=traefik-auth"
+    #   - "traefik.http.routers.traefik-secure.tls=true"
+    #   - "traefik.http.routers.traefik-secure.tls.certresolver=cloudflare"
+    #   - "traefik.http.routers.traefik-secure.tls.domains[0].main=home.jmur.ca"
+    #   - "traefik.http.routers.traefik-secure.tls.domains[0].sans=*.home.jmur.ca"
+    #   - "traefik.http.routers.traefik-secure.service=api@internal"
+  
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    # For DHCP it is recommended to remove these ports and instead add: network_mode: "host"
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      # - "67:67/udp" # Only required if you are using Pi-hole as your DHCP server
+      # - "8080:80/tcp"
+    environment:
+      TZ: 'America/Vancouver'
+      WEBPASSWORD: 'password'
+      PIHOLE_DNS_: 1.1.1.1;9.9.9.9
+      VIRTUAL_HOST: pihole.home.jmur.ca
+    # Volumes store your data between container upgrades
+    dns:
+      - 127.0.0.1
+      - 1.1.1.1
+    volumes:
+      - './etc-pihole:/etc/pihole'
+      - './etc-dnsmasq.d:/etc/dnsmasq.d'
+    #   https://github.com/pi-hole/docker-pi-hole#note-on-capabilities
+    # cap_add:
+    #   - NET_ADMIN # Required if you are using Pi-hole as your DHCP server, else not needed
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pihole.rule=Host(`pihole.home.jmur.ca`)"
+      - "traefik.http.routers.pihole.entrypoints=websecure"
+      - "traefik.http.routers.pihole.tls=true"
+      - "traefik.http.services.pihole.loadbalancer.server.port=80"
+    networks:
+      - proxy
+
+secrets:
+  cf_api_token:
+    file: ./traefik/cf_api_token.txt
+
+networks:
+  proxy:
+    external: true
